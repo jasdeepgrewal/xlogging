@@ -1,10 +1,20 @@
+//Package xlogging logs messages to console and file.
+//Has file rotation with age and size.
+//Uses INFO,WARN... types to log output.
+//Log settings can be change from Json.
 package xlogging
 
-//TODO: Need to read values from Json
-//TODO: Rotating File needs to be handled when running
-//TODO: Rotating File needs max file count
-//TODO: Rotating File Rules File age
-//TOOD: Rotating File Rules Size
+//TODO: Rule: New File: On new Instance
+//TODO: Rule: New File: Size
+//TODO: Rule: New File: Date
+
+//TODO: Rule: Delete old file: By Num
+//TODO: Rule: Delete old file: By Date
+
+//TODO: Add values to Json
+
+//TODO: Supress logger internal option
+//TOOD: Remove fmt.xx logs that are not errors
 
 import (
 	"bytes"
@@ -16,151 +26,101 @@ import (
 	"runtime/debug"
 	"strconv"
 	"time"
-
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/disk"
-	"github.com/shirou/gopsutil/host"
-	"github.com/shirou/gopsutil/mem"
 )
 
+//Log Types
 const (
-	//LogNone turns off all logs when assigned to loggingLevel
-	LogNone uint64 = 0
-	//LogInfo enables Log() output when assigned to loggingLevel
-	LogInfo uint64 = 1 << 0
-	//LogWarn enables Warn() output when assigned to loggingLevel
-	LogWarn uint64 = 1 << 1
-	//LogError enables Error() output when assigned to loggingLevel
-	LogError uint64 = 1 << 2
-	//LogAll enables all logs when assigned to loggingLevel
-	LogAll uint64 = LogInfo | LogWarn | LogError
-
-	prefixLog       = "Log::"
-	prefixWarn      = "Warn::"
-	prefixError     = "ERROR! "
-	prefixBadFormat = "Bad_Format::"
-
-	//StNone Style Type None
-	StNone uint64 = 0
-	//StLongFileName Style Type Long File Name. Overrides StShortFileName if set
-	StLongFileName uint64 = 1 << 0
-	//StShortFileName Style Type Short File Name
-	StShortFileName uint64 = 1 << 1
-	//StPrintStack Style Type Print Stack
-	StPrintStack uint64 = 1 << 2
-	//StLogToTerminal sets wether logs need to be sent to terminal when a log file is attached
-	StLogToTerminal uint64 = 1 << 3
+	//logNone turns off all logs when assigned to loggingLevel
+	logNone uint64 = 0
+	//logInfo enables Log() output when assigned to loggingLevel
+	logInfo uint64 = 1 << 0
+	//logWarn enables Warn() output when assigned to loggingLevel
+	logWarn uint64 = 1 << 1
+	//logError enables Error() output when assigned to loggingLevel
+	logError uint64 = 1 << 2
+	//logAll enables all logs when assigned to loggingLevel
+	logAll uint64 = logInfo | logWarn | logError
 )
 
-const (
-	logFileExtension = ".log"
-	logFolderPath    = "logs"
-	logBaseFileName  = "Log"
-)
+//loggingLevel bitFlag that defines which log types are printed
+var loggingLevel = logAll
 
-//LoggingLevel defines which debugs are printed
-var LoggingLevel = LogAll
-
+//enabledStreams bitFlag that defines which InfoS/InfoSf logs are printed (0-63)
 var enabledStreams uint64
 
-//StyleInfo style used for Info() and InfoS() outputs
-var StyleInfo = StNone | StLogToTerminal
+//Log Prefix (Similar to Log4Net so highlighters can use it)
+const (
+	prefixLog       = "LOG::"
+	prefixWarn      = "WARN::"
+	prefixError     = "ERROR! "
+	prefixBadFormat = "<Bad_Format>::"
+)
 
-//StyleWarn  style used for Warn() outputs
-var StyleWarn = StLongFileName | StLogToTerminal
+//Log Style types
+const (
+	//stNone Style Type None
+	stNone uint64 = 0
+	//stLongFileName Style Type Long File Name. Overrides StShortFileName if set
+	stLongFileName uint64 = 1 << 0
+	//stShortFileName Style Type Short File Name
+	stShortFileName uint64 = 1 << 1
+	//stPrintStack Style Type Print Stack
+	stPrintStack uint64 = 1 << 2
+	//stLogToTerminal sets wether logs need to be sent to terminal when a log file is attached
+	stLogToTerminal uint64 = 1 << 3
+)
 
-//StyleError  style used for Error() outputs
-var StyleError = StShortFileName | StPrintStack | StLogToTerminal
+//styleInfo style used for Info() and InfoS() outputs
+var styleInfo = stNone | stLogToTerminal
 
-//LogNoFmtToTerminal sets weather calls to NoFmt functions should write to terminal if a logFile is present
-var LogNoFmtToTerminal = true
+//styleWarn  style used for Warn() outputs
+var styleWarn = stLongFileName | stLogToTerminal
 
-var logFileAttached = false
+//styleError  style used for Error() outputs
+var styleError = stShortFileName | stPrintStack | stLogToTerminal
 
-//Setup opens or creates a new .log file and links it to the logger.
+//logNoFmtToTerminal sets weather NoFmt() logs should write to terminal if a logFile is present
+var logNoFmtToTerminal = true
+
+var useUTC = true
+var showTime = true
+
+var showLoggerInitLogs = true
+
 func init() {
-	log.SetFlags(log.LstdFlags | log.LUTC)
+	setupLogFlags()
+
 	err := setupFileIO()
 
 	if err != nil {
 		fmt.Println("[LoggerInit] Error: Failed to setup logFile. " + err.Error())
 		NoFmt("LOGGER SETUP: Log File Failed to attach!")
-	} else {
+	} else if showLoggerInitLogs {
 		NoFmt("LOGGER SETUP")
 	}
 
-	if isUsingUTC() {
-		NoFmt("Logger is using UTC time")
-		NoFmtf("LocalTime %v", time.Now())
+	if useUTC {
+		if showLoggerInitLogs {
+			NoFmt("Logger is using UTC time")
+			NoFmtf("LocalTime %v", time.Now())
+		}
 	} else {
-		NoFmt("Logger is using Local time")
-		NoFmtf("UTC Time %v", time.Now().UTC())
-	}
-}
-
-func isUsingUTC() bool {
-	return log.Flags()&log.LUTC == log.LUTC
-}
-
-func setupFileIO() error {
-	//Get folder path of log file
-	folderPath, err := getLogFolderFullPath()
-	if err != nil {
-		return err
-	}
-
-	//Check if folder exists
-	_, err = os.Stat(folderPath)
-	if os.IsNotExist(err) {
-		//Folder not found, create one
-		err = os.Mkdir(folderPath, os.ModeDir)
-		if err != nil {
-			return err
+		if showLoggerInitLogs {
+			NoFmt("Logger is using Local time")
+			NoFmtf("UTC Time %v", time.Now().UTC())
 		}
-	} else if err != nil {
-		//Folder exists, but there is some other error.
-		return err
 	}
+}
 
-	logFileName := getLogFileName()
-	logFilePath, errFilePath := getLogFilePath(logFileName)
-
-	if errFilePath != nil {
-		return errFilePath
-	}
-
-	fmt.Println("[LoggerInit] LogFilePath: " + logFilePath)
-
-	err = rotateCurrentLogFile()
-	if err != nil {
-		return err
-	}
-
-	_, err = os.Stat(logFilePath)
-
-	if err != nil {
-		f, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		if err == nil {
-			fmt.Println("[LoggerInit] Logger Log file attached SUCCESSFULLY")
-			logFileAttached = true
-			log.SetOutput(f)
-		} else {
-			logFileAttached = false
-			f.Close()
+func setupLogFlags() {
+	logFlags := 0
+	if showTime {
+		logFlags |= log.Ldate | log.Ltime
+		if useUTC {
+			logFlags |= log.LUTC
 		}
-		return err
 	}
-
-	rotFileError := errorString{"[LoggerInit] Error! Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
-	return rotFileError
-}
-
-type errorString struct {
-	s string
-}
-
-func (e errorString) Error() string {
-	return e.s
+	log.SetFlags(logFlags)
 }
 
 func getLogFileName() string {
@@ -169,7 +129,7 @@ func getLogFileName() string {
 
 func getFileNameNoExt() string {
 	t := time.Now()
-	if isUsingUTC() {
+	if useUTC {
 		t = t.UTC()
 	}
 
@@ -219,7 +179,7 @@ func rotateCurrentLogFile() error {
 	_, err = os.Stat(currentLogFilePath)
 	if err != nil {
 		//No Need to Rotate, file does not exist
-		fmt.Println("[LoggerInit] FileRotation: Rotation not needed, Log file does not exist currently at = " + currentLogFilePath)
+		//fmt.Println("[LoggerInit] FileRotation: Rotation not needed, Log file does not exist currently at = " + currentLogFilePath)
 		err = nil
 		return err
 	}
@@ -247,38 +207,38 @@ func rotateCurrentLogFile() error {
 }
 
 func printLog(logType, style uint64, v ...interface{}) {
-	if checkFlag(style, StPrintStack) {
+	if checkFlag(style, stPrintStack) {
 		printSpace()
 	}
 
-	prefix := []interface{}{getPrefix(logType, 3)}
+	prefix := []interface{}{getLinePrefix(logType, 3)}
 	finalOut := append(prefix, v...)
 	log.Println(finalOut...)
 
-	if logFileAttached && checkFlag(style, StLogToTerminal) {
+	if logFileAttached && checkFlag(style, stLogToTerminal) {
 		fmt.Println(finalOut...)
 	}
 
-	if checkFlag(style, StPrintStack) {
+	if checkFlag(style, stPrintStack) {
 		debug.PrintStack()
 		printSpace()
 	}
 }
 
 func printLogf(logType, style uint64, format string, v ...interface{}) {
-	if checkFlag(style, StPrintStack) {
+	if checkFlag(style, stPrintStack) {
 		printSpace()
 	}
 
-	prefix := getPrefix(logType, 3)
+	prefix := getLinePrefix(logType, 3)
 	prefix += " " + format + "\n"
 	log.Printf(prefix, v...)
 
-	if logFileAttached && checkFlag(style, StLogToTerminal) {
+	if logFileAttached && checkFlag(style, stLogToTerminal) {
 		fmt.Printf(prefix, v...)
 	}
 
-	if checkFlag(style, StPrintStack) {
+	if checkFlag(style, stPrintStack) {
 		debug.PrintStack()
 		printSpace()
 	}
@@ -286,70 +246,70 @@ func printLogf(logType, style uint64, format string, v ...interface{}) {
 
 //Info prints using Println format to logInfo style log
 func Info(v ...interface{}) {
-	if canLog(LogInfo) {
-		printLog(LogInfo, StyleInfo, v...)
+	if canLog(logInfo) {
+		printLog(logInfo, styleInfo, v...)
 	}
 }
 
 //Infof prints using Printf format to logInfo style log
 func Infof(format string, v ...interface{}) {
-	if canLog(LogInfo) {
-		printLogf(LogInfo, StyleInfo, format, v...)
+	if canLog(logInfo) {
+		printLogf(logInfo, styleInfo, format, v...)
 	}
 }
 
 //InfoS prints using Printf format to a seperate log stream of logInfo style. This can be enabled or disabled individually
 func InfoS(stream byte, v ...interface{}) {
-	if canLog(LogInfo) && checkBit(enabledStreams, stream) {
+	if canLog(logInfo) && checkBit(enabledStreams, stream) {
 		streamIndex := []interface{}{stream, "|"}
 		finalOut := append(streamIndex, v...)
 
-		printLog(LogInfo, StyleInfo, finalOut)
+		printLog(logInfo, styleInfo, finalOut)
 	}
 }
 
 //InfoSf prints using Println format to a seperate log stream of logInfo style. This can be enabled or disabled individually
 func InfoSf(stream byte, format string, v ...interface{}) {
-	if canLog(LogInfo) && checkBit(enabledStreams, stream) {
+	if canLog(logInfo) && checkBit(enabledStreams, stream) {
 		streamIndex := []interface{}{stream, "|"}
 		finalOut := append(streamIndex, v...)
 
-		printLogf(LogInfo, StyleInfo, format, finalOut)
+		printLogf(logInfo, styleInfo, format, finalOut)
 	}
 }
 
 //Warn prints using Println format to logWarn style log
 func Warn(v ...interface{}) {
-	if canLog(LogWarn) {
-		printLog(LogWarn, StyleWarn, v...)
+	if canLog(logWarn) {
+		printLog(logWarn, styleWarn, v...)
 	}
 }
 
 //Warnf prints using Printf format to logWarn style log
 func Warnf(format string, v ...interface{}) {
-	if canLog(LogWarn) {
-		printLogf(LogWarn, StyleWarn, format, v...)
+	if canLog(logWarn) {
+		printLogf(logWarn, styleWarn, format, v...)
 	}
 }
 
 //Error prints using Println format to logWarn style log
 func Error(v ...interface{}) {
-	if canLog(LogError) {
-		printLog(LogError, StyleError, v...)
+	if canLog(logError) {
+		printLog(logError, styleError, v...)
 	}
 }
 
 //Errorf prints using Printf format to logWarn style log
 func Errorf(format string, v ...interface{}) {
-	if canLog(LogError) {
-		printLogf(LogError, StyleError, format, v...)
+	if canLog(logError) {
+		printLogf(logError, styleError, format, v...)
 	}
 }
 
 //NoFmt logs without any special formatting using Println
 func NoFmt(v ...interface{}) {
 	log.Println(v...)
-	if logFileAttached && LogNoFmtToTerminal {
+	if logFileAttached && logNoFmtToTerminal {
 		fmt.Println(v...)
 	}
 }
@@ -357,13 +317,13 @@ func NoFmt(v ...interface{}) {
 //NoFmtf logs without any special formatting using Printf
 func NoFmtf(format string, v ...interface{}) {
 	log.Printf(format, v...)
-	if logFileAttached && LogNoFmtToTerminal {
+	if logFileAttached && logNoFmtToTerminal {
 		fmt.Printf(format+"\n", v...)
 	}
 }
 
 func canLog(logLv uint64) bool {
-	return LoggingLevel&logLv == logLv
+	return loggingLevel&logLv == logLv
 }
 
 func printSpace() {
@@ -373,30 +333,28 @@ func printSpace() {
 	log.SetFlags(orgFlags)
 }
 
-//Note: Should be called from Log(),Warn()... functions only,
-//otherwise Linenumber and file will not be offset correctly.
-func getPrefix(logType uint64, sourceDepth int) string {
+func getLinePrefix(logType uint64, sourceDepth int) string {
 
 	var strBuffer bytes.Buffer
 	var style uint64
 	switch logType {
-	case LogInfo:
+	case logInfo:
 		strBuffer.WriteString(prefixLog)
-		style = StyleInfo
-	case LogWarn:
+		style = styleInfo
+	case logWarn:
 		strBuffer.WriteString(prefixWarn)
-		style = StyleWarn
-	case LogError:
+		style = styleWarn
+	case logError:
 		strBuffer.WriteString(prefixError)
-		style = StyleError
+		style = styleError
 	default:
 		strBuffer.WriteString(prefixBadFormat)
 	}
 
 	fileNameType := 0
-	if checkFlag(style, StLongFileName) {
+	if checkFlag(style, stLongFileName) {
 		fileNameType = 2
-	} else if checkFlag(style, StShortFileName) {
+	} else if checkFlag(style, stShortFileName) {
 		fileNameType = 1
 	}
 
@@ -458,115 +416,4 @@ func checkBit(value uint64, bit byte) bool {
 
 func checkFlag(value, flag uint64) bool {
 	return value&flag == flag
-}
-
-//PrintCaller prints the values of runtime.Caller
-func PrintCaller() {
-	pc, file, line, ok := runtime.Caller(2)
-
-	if ok {
-		var strBuffer bytes.Buffer
-
-		strBuffer.WriteString("Caller Details\n")
-
-		strBuffer.WriteString("\t\t")
-		strBuffer.WriteString(runtime.FuncForPC(pc).Name())
-		strBuffer.WriteString("()\n")
-
-		strBuffer.WriteString("\t\t")
-		strBuffer.WriteString(file)
-		strBuffer.WriteString("(")
-		strBuffer.WriteString(strconv.Itoa(line))
-		strBuffer.WriteString(")\n")
-
-		NoFmt(strBuffer.String())
-	} else {
-		Error("Logging: failed to get values from runtime.Caller()")
-	}
-}
-
-//PrintProcessInfo prints information about the current running process
-func PrintProcessInfo() {
-	NoFmtf("Process pid[%v] ppid[%v] uid[%v]", os.Getpid(), os.Getppid(), os.Getuid())
-}
-
-//PrintOSInfo prints information about the OS and architecture
-func PrintOSInfo() {
-	NoFmtf("OS [%v] Arch [%v] MaxThreads[%v]", runtime.GOOS, runtime.GOARCH, runtime.GOMAXPROCS(-1))
-	platform, family, version, _ := host.PlatformInformation()
-
-	NoFmtf("Platform [%v] Family[%v] Version[%v]", platform, family, version)
-}
-
-//PrintCPUInfo prints detailed information about the cpu
-func PrintCPUInfo() {
-	v, _ := cpu.Info()
-
-	for i := range v {
-		NoFmtf("CPU[%v] Cores [%v] Mhz [%v] %v[%v]", v[i].CPU, v[i].Cores, v[i].Mhz, v[i].VendorID, v[i].ModelName)
-	}
-}
-
-//PrintCPUUsage prints cpu used by the system.
-func PrintCPUUsage() {
-	if runtime.GOOS == "windows" {
-		printCPUUsageWin32()
-	} else {
-		printCPUUsageOther()
-	}
-}
-
-func printCPUUsageOther() {
-	cpuPerf, err := cpu.Percent(time.Millisecond*10, true)
-	if err != nil {
-		log.Println(err)
-	}
-
-	for i := range cpuPerf {
-		NoFmtf("Cpu[%v] %f%%", i, cpuPerf[i])
-	}
-}
-
-func printCPUUsageWin32() {
-	cpuPerf, err := cpu.PerfInfo()
-	if err != nil {
-		log.Println(err)
-	}
-
-	for i := range cpuPerf {
-		NoFmtf("(Win) Cpu[%v] Name[%v] usage[%v]", i, cpuPerf[i].Name, cpuPerf[i].PercentProcessorTime)
-	}
-}
-
-//PrintMemInfo prints information about system memory
-func PrintMemInfo() {
-	v, _ := mem.VirtualMemory()
-
-	NoFmtf("MemSys(KB) Total: %v, Available:%v, Used:%f%%", v.Total/1024, v.Available/1024, v.UsedPercent)
-}
-
-//PrintMemUsage prints information about memory used by the application
-func PrintMemUsage() {
-	var mem = runtime.MemStats{}
-	runtime.ReadMemStats(&mem)
-	NoFmtf("MemApp(KB) SysReserved %v, TotalAlloc %v, CurrentAlloc %v", mem.Sys/1024, mem.TotalAlloc/1024, mem.Alloc/1024)
-}
-
-//PrintDiskInfo prints information about the disk
-func PrintDiskInfo() {
-	partitions, _ := disk.Partitions(true)
-
-	for i := range partitions {
-		stat, _ := disk.Usage(partitions[i].Mountpoint)
-		NoFmtf("Disk [%v] [%v] Total(MB)[%v] Free(MB)[%v] Used[%v%%]", partitions[i].Mountpoint, partitions[i].Fstype, stat.Total/1048576, stat.Free/1048576, stat.UsedPercent)
-	}
-}
-
-//PrintSystemInfo prints the system information. CPU, memory, disk...
-func PrintSystemInfo() {
-	PrintOSInfo()
-	PrintProcessInfo()
-	PrintCPUInfo()
-	PrintMemInfo()
-	PrintDiskInfo()
 }
