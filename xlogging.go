@@ -70,16 +70,16 @@ const (
 )
 
 //styleInfo style used for Info() and InfoS() outputs
-var styleInfo = stNone | stLogToTerminal
+var styleInfo = stNone
 
 //styleWarn  style used for Warn() outputs
-var styleWarn = stLongFileName | stLogToTerminal
+var styleWarn = stLongFileName
 
 //styleError  style used for Error() outputs
-var styleError = stShortFileName | stPrintStack | stLogToTerminal
+var styleError = stShortFileName | stPrintStack
 
 //logNoFmtToTerminal sets weather NoFmt() logs should write to terminal if a logFile is present
-var logNoFmtToTerminal = true
+var logNoFmtToTerminal = false
 
 var useUTC = true
 var showTime = true
@@ -131,13 +131,28 @@ func printLog(logType, style uint64, v ...interface{}) {
 	finalOut := append(prefix, v...)
 	log.Println(finalOut...)
 
-	if logFileAttached && checkFlag(style, stLogToTerminal) {
+	//fmt.Printf("logFile Attached %v\n", logFileAttached)
+	//fmt.Printf("checkFlag %v\n", checkFlag(style, stLogToTerminal))
+	logToTerminal := logFileAttached && checkFlag(style, stLogToTerminal)
+	if logToTerminal {
 		fmt.Println(finalOut...)
 	}
 
 	if checkFlag(style, stPrintStack) {
-		debug.PrintStack()
+		printStack(logToTerminal)
 		printSpace()
+	}
+}
+
+func printStack(logToTerminal bool) {
+	byteArray := debug.Stack()
+	n := len(byteArray)
+	s := string(byteArray[:n])
+
+	log.Println(s)
+
+	if logToTerminal {
+		fmt.Println(s)
 	}
 }
 
@@ -150,12 +165,13 @@ func printLogf(logType, style uint64, format string, v ...interface{}) {
 	prefix += " " + format + "\n"
 	log.Printf(prefix, v...)
 
-	if logFileAttached && checkFlag(style, stLogToTerminal) {
+	logToTerminal := logFileAttached && checkFlag(style, stLogToTerminal)
+	if logToTerminal {
 		fmt.Printf(prefix, v...)
 	}
 
 	if checkFlag(style, stPrintStack) {
-		debug.PrintStack()
+		printStack(logToTerminal)
 		printSpace()
 	}
 }
@@ -245,7 +261,7 @@ func canLog(logLv uint64) bool {
 func printSpace() {
 	var orgFlags = log.Flags()
 	log.SetFlags(0)
-	log.Printf("\n\n")
+	log.Printf("\n")
 	log.SetFlags(orgFlags)
 }
 
