@@ -1,8 +1,12 @@
 package xlogging
 
 import (
+	"bytes"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
+	"time"
 )
 
 var splitRuleNewRun = true
@@ -82,4 +86,87 @@ func setupFileIO() error {
 
 	rotFileError := stdError{"[LoggerInit] Error! Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
 	return rotFileError
+}
+
+func getLogFileName() string {
+	return getFileNameNoExt() + logFileExtension
+}
+
+func getFileNameNoExt() string {
+	t := time.Now()
+	if useUTC {
+		t = t.UTC()
+	}
+
+	year, month, day := t.Date()
+	var strBuffer bytes.Buffer
+	strBuffer.WriteString(logBaseFileName)
+	strBuffer.WriteString("_")
+	strBuffer.WriteString(strconv.Itoa(day))
+	strBuffer.WriteString("_")
+	strBuffer.WriteString(strconv.Itoa(int(month)))
+	strBuffer.WriteString("_")
+	strBuffer.WriteString(strconv.Itoa(year))
+
+	return strBuffer.String()
+}
+
+func getLogFilePath(fileName string) (string, error) {
+	var strBuffer bytes.Buffer
+	folderPath, err := getLogFolderFullPath()
+	if err == nil {
+		strBuffer.WriteString(folderPath)
+		strBuffer.WriteString(string(os.PathSeparator))
+		strBuffer.WriteString(fileName)
+	}
+
+	return strBuffer.String(), err
+}
+
+func getLogFolderFullPath() (string, error) {
+	folderPath, err := filepath.Abs(logFolderPath)
+
+	return folderPath, err
+}
+
+func rotateCurrentLogFile() error {
+	var errFilePath error
+	var err error
+
+	currFileName := getLogFileName()
+	newPath, errFilePath := getLogFilePath(currFileName)
+	currentLogFilePath := newPath
+
+	if errFilePath != nil {
+		return errFilePath
+	}
+
+	_, err = os.Stat(currentLogFilePath)
+	if err != nil {
+		//No Need to Rotate, file does not exist
+		//fmt.Println("[LoggerInit] FileRotation: Rotation not needed, Log file does not exist currently at = " + currentLogFilePath)
+		err = nil
+		return err
+	}
+
+	counter := 1
+
+	for err == nil {
+		_, err = os.Stat(newPath)
+		if err != nil {
+			//fmt.Println("[LoggerInit] FileRotation: FileNotFound " + newPath)
+		} else {
+			currFileName = getFileNameNoExt() + "_" + strconv.Itoa(counter) + logFileExtension
+			newPath, errFilePath = getLogFilePath(currFileName)
+			if errFilePath != nil {
+				return errFilePath
+			}
+			//fmt.Println("[LoggerInit] FileRotation: UpdatedCheckPath: " + newPath)
+			counter++
+		}
+	}
+
+	err = os.Rename(currentLogFilePath, newPath)
+
+	return err
 }
