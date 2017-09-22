@@ -1,4 +1,4 @@
-package logging
+package xlogging
 
 //TODO: Need to read values from Json
 //TODO: Rotating File needs to be handled when running
