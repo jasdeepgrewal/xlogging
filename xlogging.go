@@ -70,21 +70,21 @@ const (
 )
 
 //styleInfo style used for Info() and InfoS() outputs
-var styleInfo = stNone
+var styleInfo = stNone | stLogToTerminal
 
 //styleWarn  style used for Warn() outputs
-var styleWarn = stLongFileName
+var styleWarn = stLongFileName | stLogToTerminal
 
 //styleError  style used for Error() outputs
-var styleError = stShortFileName | stPrintStack
+var styleError = stShortFileName | stPrintStack | stLogToTerminal
 
 //logNoFmtToTerminal sets weather NoFmt() logs should write to terminal if a logFile is present
-var logNoFmtToTerminal = false
+var logNoFmtToTerminal = true
 
 var useUTC = true
 var showTime = true
 
-var showLoggerInitLogs = true
+var showLoggerInitLogs = false
 
 func init() {
 	setupLogFlags()
@@ -93,6 +93,7 @@ func init() {
 
 	if err != nil {
 		fmt.Println("[LoggerInit] Error: Failed to setup logFile. " + err.Error())
+		debug.PrintStack()
 		NoFmt("LOGGER SETUP: Log File Failed to attach!")
 	} else if showLoggerInitLogs {
 		NoFmt("LOGGER SETUP")

@@ -159,8 +159,8 @@ func BenchmarkLogNoFmtf() {
 
 //BenchmarkAllLogs ...does what it says...
 func BenchmarkAllLogs() {
-	fnln := make([]func(...interface{}), 0)
-	fnf := make([]func(string, ...interface{}), 0)
+	fnln := make([]func(...interface{}), 0, 4)
+	fnf := make([]func(string, ...interface{}), 0, 4)
 
 	fnln = append(fnln, xlog.Info)
 	fnln = append(fnln, xlog.Warn)

@@ -2,6 +2,7 @@ package xlogging
 
 import (
 	"bytes"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 	"time"
 )
 
-var splitRuleNewRun = true
+var splitRuleNewRun = false
 
 //Ignored if set to 0
 var splitRuleSize = 0
@@ -64,28 +65,71 @@ func setupFileIO() error {
 
 	//fmt.Println("[LoggerInit] LogFilePath: " + logFilePath)
 
-	err = rotateCurrentLogFile()
-	if err != nil {
-		return err
-	}
-
-	_, err = os.Stat(logFilePath)
-
-	if err != nil {
-		f, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		if err == nil {
-			//fmt.Println("[LoggerInit] Logger Log file attached SUCCESSFULLY")
-			logFileAttached = true
-			log.SetOutput(f)
-		} else {
-			logFileAttached = false
-			f.Close()
+	if splitRuleNewRun {
+		err = rotateCurrentLogFile()
+		if err != nil {
+			return err
 		}
-		return err
+
+		//Check if the file exists at path
+		_, err = os.Stat(logFilePath)
+		if err == nil {
+			err = stdError{"Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
+			return err
+		}
+	} else {
+		files, err := ioutil.ReadDir(folderPath)
+		if err != nil {
+			return err
+		}
+
+		if lenFiles := len(files); lenFiles > 0 {
+			latestFile := getLatestFile(files)
+			if latestFile != nil {
+				//Set path to existing file
+				logFilePath = folderPath + string(os.PathSeparator) + latestFile.Name()
+				//fmt.Println("[LoggerInit] using existing file " + logFilePath)
+			}
+		}
+		//Else: log file will be created with previous(see above in func) set logFilePath.
 	}
 
-	rotFileError := stdError{"[LoggerInit] Error! Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
-	return rotFileError
+	//Create or open the log file at logFilePath
+	f, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err == nil {
+		//fmt.Println("[LoggerInit] Logger Log file attached SUCCESSFULLY")
+		logFileAttached = true
+		log.SetOutput(f)
+	} else {
+		logFileAttached = false
+		//fmt.Println("[LoggerInit] Logger failed to find specified file at path " + logFilePath)
+		f.Close()
+	}
+	return err
+
+}
+
+func getLatestFile(files []os.FileInfo) os.FileInfo {
+	index := -1
+	var bestTime int64
+	var currentTime int64
+	for i := range files {
+		if files[i].IsDir() {
+			continue
+		}
+
+		currentTime = files[i].ModTime().Unix()
+		if currentTime > bestTime {
+			index = i
+			bestTime = currentTime
+		}
+	}
+
+	if index > -1 {
+		return files[index]
+	}
+
+	return nil
 }
 
 func getLogFileName() string {
