@@ -1,20 +1,25 @@
 //Package xlogging logs messages to console and file.
-//Has file rotation with age and size.
+//This is a wrapper around the go log package.
 //Uses INFO,WARN... types to log output.
+//Has file rotation with age and size.
 //Log settings can be change from Json.
 package xlogging
 
 //TODO: Rule: New File: On new Instance
 //TODO: Rule: New File: Size
-//TODO: Rule: New File: Date
+//TODO: Rule: New File: Age
+//TODO: Rule: New File: New Date
 
 //TODO: Rule: Delete old file: By Num
-//TODO: Rule: Delete old file: By Date
 
-//TODO: Add values to Json
+//TODO: Json: LogLevel + InfoStreams
+//TODO: Json: Log Styles for all + NoFmt
+//TODO: Json: OtherSettings - showtime,utc,showLogger init logs etc.
+//TODO: Json: File split rules
+//TODO: Json: File history rules
 
-//TODO: Supress logger internal option
-//TOOD: Remove fmt.xx logs that are not errors
+//TODO: Print stack needs better format. It is not aligned
+//TODO: When printing file Line num, keep Show log first then line and file. If it is long file name, show it in second line.
 
 import (
 	"bytes"
@@ -70,7 +75,7 @@ const (
 )
 
 //styleInfo style used for Info() and InfoS() outputs
-var styleInfo = stNone | stLogToTerminal
+var styleInfo = stNone
 
 //styleWarn  style used for Warn() outputs
 var styleWarn = stLongFileName | stLogToTerminal
@@ -81,10 +86,10 @@ var styleError = stShortFileName | stPrintStack | stLogToTerminal
 //logNoFmtToTerminal sets weather NoFmt() logs should write to terminal if a logFile is present
 var logNoFmtToTerminal = true
 
-var useUTC = true
+var useUTC = false
 var showTime = true
 
-var showLoggerInitLogs = false
+var showLoggerInitLogs = true
 
 func init() {
 	setupLogFlags()
@@ -97,16 +102,15 @@ func init() {
 		NoFmt("LOGGER SETUP: Log File Failed to attach!")
 	} else if showLoggerInitLogs {
 		NoFmt("LOGGER SETUP")
+		NoFmt("Logger File Path: " + logFilePath)
 	}
 
-	if useUTC {
-		if showLoggerInitLogs {
-			NoFmt("Logger is using UTC time")
+	if showLoggerInitLogs {
+		if useUTC {
+			NoFmtf("Logger Time : UTC (%v)", time.Now().UTC())
 			NoFmtf("LocalTime %v", time.Now())
-		}
-	} else {
-		if showLoggerInitLogs {
-			NoFmt("Logger is using Local time")
+		} else {
+			NoFmtf("Logger Time : Local (%v)", time.Now())
 			NoFmtf("UTC Time %v", time.Now().UTC())
 		}
 	}
@@ -191,7 +195,7 @@ func Infof(format string, v ...interface{}) {
 	}
 }
 
-//InfoS prints using Printf format to a seperate log stream of logInfo style. This can be enabled or disabled individually
+//InfoS prints using Printf format to a separate log stream of logInfo style. This can be enabled or disabled individually
 func InfoS(stream byte, v ...interface{}) {
 	if canLog(logInfo) && checkBit(enabledStreams, stream) {
 		streamIndex := []interface{}{stream, "|"}
@@ -201,7 +205,7 @@ func InfoS(stream byte, v ...interface{}) {
 	}
 }
 
-//InfoSf prints using Println format to a seperate log stream of logInfo style. This can be enabled or disabled individually
+//InfoSf prints using Println format to a separate log stream of logInfo style. This can be enabled or disabled individually
 func InfoSf(stream byte, format string, v ...interface{}) {
 	if canLog(logInfo) && checkBit(enabledStreams, stream) {
 		streamIndex := []interface{}{stream, "|"}

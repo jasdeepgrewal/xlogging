@@ -2,6 +2,7 @@ package xlogging
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -10,13 +11,14 @@ import (
 	"time"
 )
 
+//splitRuleNewRun should a new file be created everytime the app launches
 var splitRuleNewRun = false
 
-//Ignored if set to 0
-var splitRuleSize = 0
+//splitRuleSize size in MB after which a new log file is created. Ignored if set to 0
+var splitRuleSize int64 = 10
 
-//Ignored if set to 0
-var splitRuleAge = 3600 //Seconds
+//splitRuleAge split file if it is older than this seconds. Ignored if set to 0
+var splitRuleAge int64 = 3600 //Seconds
 
 //From seconds conversion conversion
 const (
@@ -57,7 +59,8 @@ func setupFileIO() error {
 	}
 
 	logFileName := getLogFileName()
-	logFilePath, errFilePath := getLogFilePath(logFileName)
+	var errFilePath error
+	logFilePath, errFilePath = getLogFilePath(logFileName)
 
 	if errFilePath != nil {
 		return errFilePath
@@ -66,15 +69,8 @@ func setupFileIO() error {
 	//fmt.Println("[LoggerInit] LogFilePath: " + logFilePath)
 
 	if splitRuleNewRun {
-		err = rotateCurrentLogFile()
+		err = rotateAndCheckLogFile()
 		if err != nil {
-			return err
-		}
-
-		//Check if the file exists at path
-		_, err = os.Stat(logFilePath)
-		if err == nil {
-			err = stdError{"Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
 			return err
 		}
 	} else {
@@ -88,6 +84,13 @@ func setupFileIO() error {
 			if latestFile != nil {
 				//Set path to existing file
 				logFilePath = folderPath + string(os.PathSeparator) + latestFile.Name()
+				if checkSplitRuleSize() || checkSplitRuleAge() {
+					fmt.Println("Creating new file")
+					err = rotateAndCheckLogFile()
+					if err != nil {
+						return err
+					}
+				}
 				//fmt.Println("[LoggerInit] using existing file " + logFilePath)
 			}
 		}
@@ -107,6 +110,31 @@ func setupFileIO() error {
 	}
 	return err
 
+}
+
+//retuns true if new file is needed
+func checkSplitRuleSize() bool {
+	if splitRuleSize <= 0 {
+		return false
+	}
+
+	file, err := os.Stat(logFilePath)
+
+	if err == nil {
+		fileSizeMB := file.Size()
+		fileSizeMB /= 1024 * 1024
+		if fileSizeMB > splitRuleSize {
+			return true
+		}
+		return false
+	}
+
+	return true
+}
+
+//retuns true if new file is needed
+func checkSplitRuleAge() bool {
+	return false
 }
 
 func getLatestFile(files []os.FileInfo) os.FileInfo {
@@ -173,7 +201,23 @@ func getLogFolderFullPath() (string, error) {
 	return folderPath, err
 }
 
-func rotateCurrentLogFile() error {
+func rotateAndCheckLogFile() error {
+	err := rotateLogFile()
+	if err != nil {
+		return err
+	}
+
+	//Check if the file exists at path
+	_, err = os.Stat(logFilePath)
+	if err == nil {
+		err = stdError{"Log file already exists. This should not happen.\n RotateXX() should have renamed the existing file."}
+		return err
+	}
+
+	return nil
+}
+
+func rotateLogFile() error {
 	var errFilePath error
 	var err error
 
